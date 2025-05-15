@@ -11,6 +11,17 @@ huatuo:
         do_sample: False         
 
 
+cxl:
+    model_id: "cxl"
+    load:
+        config_dir: "/data/framework_vllm/cxl/models/Qwen/Qwen2.5-1.5B"
+        device: 'cuda'        
+        precision: 'fp16'
+    generation_config: 
+        max_new_tokens: 512     
+        min_new_tokens: 1          
+        do_sample: False    
+
 huatuo-chat: # the public version on HF 
     model_id: "huatuo-chat"
     load:

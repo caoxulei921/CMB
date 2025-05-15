@@ -46,6 +46,7 @@ def main(args):
         use_qa = args.use_qa, 
         use_cot = args.use_cot,
         use_fewshot = args.use_fewshot,
+        use_eagle = args.use_eagle,
     )
 
     
@@ -60,7 +61,7 @@ def main(args):
     for batch_idx, batch in enumerate(dataloader_iterator, start=1):
         
         # one step to get outputs
-        response, data = runner.generate_batch(batch)
+        response, data = runner.generate_batch(batch)   ## batch 和data 一样
         accumulated_response.extend(response) # model responses
         accumulated_data.extend(data) # raw data
 
@@ -198,6 +199,13 @@ if __name__ == "__main__":
         "--use_input_path",
         action="store_true",
         help="whether to use input_path(action: True)",
+    )
+
+    parser.add_argument(
+        "--use_eagle",
+        action="store_true",  # 默认为False，传入--use_eagle时变为True
+        default=False,        # 显式设置默认值
+        help="whether to use eagle (default: True)"
     )
     # parser.add_argument(
     #     "--use_qa",

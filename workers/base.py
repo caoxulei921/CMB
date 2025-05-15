@@ -7,13 +7,46 @@ from dataclasses import dataclass
 from accelerate import Accelerator
 from copy import deepcopy
 
-from peft import PeftModel
+#from peft import PeftModel
 from transformers import (
     AutoModel, AutoModelForCausalLM, 
     AutoTokenizer, LlamaTokenizer,
     AutoConfig,
     
 )
+
+class VllmEngine():
+    def __init__(self):
+        import sys
+        sys.path.append("/data/framework_vllm/cxl/vllm")
+        from vllm import LLM, SamplingParams
+        import os
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        # sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
+        self.sampling_params = SamplingParams(top_k=1, max_tokens=50)
+        self.test_prompts = ["根据临床表现，你需要进一步住院治疗，并抽血化验"]
+        self.llm = LLM(
+            model="/data/framework_vllm/models/Qwen2.5-32B-Instruct-AWQ",
+            tensor_parallel_size=1,
+            enable_chunked_prefill=False,
+            speculative_config={
+                # "model": "/data/framework_vllm/models/EAGLE-Qwen2.5-32B-Instruct-new0407",
+                "model": "/data/framework_vllm/cxl/models/eagle-32b-ori-med/EAGLE-model",
+                "draft_tensor_parallel_size": 1,
+                "num_speculative_tokens": 5,
+                "method": "eagle",
+            },
+            enforce_eager=True
+        )
+    
+    def generate(self, input):
+        res = []
+        outputs = self.llm.generate(input, self.sampling_params)
+        for output in outputs:
+            #prompt = output.prompt
+            generated_text = output.outputs[0].text
+            res.append(generated_text)
+        return res
 
 
 @dataclass
@@ -29,12 +62,13 @@ class BaseWorker():
     use_qa: bool = False
     generate_fewshot_examples_only: bool = False
     use_fewshot: bool = False,
+    use_eagle: bool = True
 
     def __post_init__(self):
         if self.generate_fewshot_examples_only: # no need to do post_init if we only need to generate fewshot examples
             return
         self.print_in_main(f'loading config: {self.cfg.load}')
-        self.model, self.tokenizer = self.load_model_and_tokenizer(self.cfg.load)
+        self.model, self.tokenizer = self.load_model_and_tokenizer(self.cfg.load, self.use_eagle)
         self.device = self.cfg.load.device
         self.accelerator = Accelerator()
         self.prompt_wrapper = PromptWrapper(
@@ -47,6 +81,9 @@ class BaseWorker():
         self.init_generation_config(self.cfg)
         self.init_dataloader(self.input_pth, self.batch_size)
         self.init_writer(self.output_pth)
+
+        if self.use_eagle is True:
+            self.vllm_engine = VllmEngine()
     
 
     @classmethod
@@ -60,6 +97,7 @@ class BaseWorker():
         use_cot = False,
         generate_fewshot_examples_only = False,
         use_fewshot = False,
+        use_eagle = True,
         ):
         assert cfg.get('load', None) is not None
         
@@ -72,6 +110,7 @@ class BaseWorker():
             use_qa = use_qa, 
             generate_fewshot_examples_only = generate_fewshot_examples_only,
             use_fewshot = use_fewshot,
+            use_eagle = use_eagle
         )
 
 
@@ -184,11 +223,14 @@ class BaseWorker():
             batch, lines = self.prompt_wrapper.wrap_conv(batch) 
         else:
             batch, lines = self.prompt_wrapper.wrap(batch) 
-        inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors="pt").to(self.device)
-        self.prompt_wrapper.lengths = inputs.input_ids.shape[1]
-        outputs = self.unwrap_model().generate( **inputs, **self.generation_config)
-        outputs = self.prompt_wrapper.unwrap(outputs, self.generation_config.get('num_return_sequences', 1))
-        
+        if self.use_eagle is False:
+            inputs = self.tokenizer(batch, padding=True, truncation=True, return_tensors="pt").to(self.device)
+            self.prompt_wrapper.lengths = inputs.input_ids.shape[1]
+            outputs = self.unwrap_model().generate( **inputs, **self.generation_config)
+            outputs = self.prompt_wrapper.unwrap(outputs, self.generation_config.get('num_return_sequences', 1))
+        else:
+            outputs = self.vllm_engine.generate(batch)
+            outputs = self.prompt_wrapper.vllm_unwrap(outputs, self.generation_config.get('num_return_sequences', 1))
         return outputs, lines
 
 
@@ -298,6 +340,7 @@ class PromptWrapper():
         res = []
         lines = []
         for line in data:
+            #print (line)
             line["option_str"] = "\n".join(
                 [f"{k}. {v}" for k, v in line["option"].items() if len(v) > 1]
             )
@@ -334,6 +377,16 @@ class PromptWrapper():
             output = self.tokenizer.decode(output, skip_special_tokens=True)
 
             batch_return.append(output)
+            if i % num_return_sequences == num_return_sequences - 1:
+                responses_list.append(batch_return)
+                batch_return = []
+        return responses_list
+    
+    def vllm_unwrap(self, outputs, num_return_sequences):        
+        batch_return = []
+        responses_list = []
+        for i in range(len(outputs)):
+            batch_return.append(outputs[i])
             if i % num_return_sequences == num_return_sequences - 1:
                 responses_list.append(batch_return)
                 batch_return = []

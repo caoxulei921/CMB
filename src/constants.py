@@ -25,5 +25,5 @@ id2worker_class = {
     'chatmed-consult': ChatMedConsultWorker,
     'medicalgpt': MedicalGPTWorker,
     'chatglm3_6b': ChatGLM3Worker,
-    'my_model': MyModelWorker, # modify here
+    'cxl': MyModelWorker, # modify here
 } 

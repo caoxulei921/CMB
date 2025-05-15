@@ -1,11 +1,11 @@
 import json
 
 # 读取CMB-test-choice-answer (3).json文件
-with open('/data/ground_truth/CMB-test-choice-answer.json', 'r', encoding='utf-8') as f:
+with open('/data/framework_vllm/cxl/CMB/CMB/data/CMB-test-choice-answer.json', 'r', encoding='utf-8') as f:
     cmb_data = json.load(f)
 
 #  读取model_answer_demo.json文件
-with open('model_answer.json', 'r', encoding='utf-8') as f:
+with open('/data/framework_vllm/cxl/CMB/CMB/result/Exam/cxl/modelans-eagle-32b-ori-med-bfloat16-use_col.json', 'r', encoding='utf-8') as f:
     model_data = json.load(f)
 
 # 将WiseDiag数据转换为字典，方便查找
@@ -13,15 +13,20 @@ wisediag_dict = {item['id']: item['model_answer'] for item in model_data}
 
 # 初始化统计字典
 accuracy_stats = {}
-
+exam_type_set = set()
+exam_class_set = set()
+question_type_set = set()
 # 遍历CMB数据，进行对比和统计
 for item in cmb_data:
     exam_type = item['exam_type']
     exam_class = item['exam_class']
     question_id = item['id']
     correct_answer = item['answer']
+    question_type = item['question_type']
     model_answer = wisediag_dict.get(question_id, '')
-
+    exam_type_set.add(exam_type)
+    exam_class_set.add(exam_class)
+    question_type_set.add(question_type)
     # 初始化统计结构
     if exam_type not in accuracy_stats:
         accuracy_stats[exam_type] = {}
@@ -30,8 +35,12 @@ for item in cmb_data:
 
     # 统计正确和总数
     accuracy_stats[exam_type][exam_class]['total'] += 1
-    if correct_answer == model_answer:
-        accuracy_stats[exam_type][exam_class]['correct'] += 1
+    if question_type == '单项选择题':
+        if correct_answer == model_answer[0:1]:
+            accuracy_stats[exam_type][exam_class]['correct'] += 1
+    elif question_type == '多项选择题':
+        if correct_answer == model_answer:
+            accuracy_stats[exam_type][exam_class]['correct'] += 1
 
 # 计算准确率并保存到结果字典
 result = {
